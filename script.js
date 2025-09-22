@@ -60,10 +60,114 @@ async function ensureModelLoaded() {
     netPromise = bodyPix.load({
       architecture: 'ResNet50',
       outputStride: 16,
-      quantBytes: 2,
+      quantBytes: 4,
     });
   }
   return netPromise;
+}
+
+function dilateBinaryMask(mask, width, height, iterations) {
+  if (iterations <= 0) {
+    return mask;
+  }
+
+  let current = mask;
+  let next = new Uint8ClampedArray(mask.length);
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    next.set(current);
+    for (let y = 0; y < height; y += 1) {
+      const rowOffset = y * width;
+      for (let x = 0; x < width; x += 1) {
+        const index = rowOffset + x;
+        if (next[index]) {
+          continue;
+        }
+
+        let shouldFill = false;
+        for (let dy = -1; dy <= 1 && !shouldFill; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) {
+            continue;
+          }
+          const nRowOffset = ny * width;
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) {
+              continue;
+            }
+            if (current[nRowOffset + nx]) {
+              shouldFill = true;
+              break;
+            }
+          }
+        }
+
+        if (shouldFill) {
+          next[index] = 255;
+        }
+      }
+    }
+
+    const temp = current;
+    current = next;
+    next = temp;
+  }
+
+  return current;
+}
+
+function createFeatheredMaskCanvas(segmentation) {
+  const { data, width, height } = segmentation;
+  const totalPixels = width * height;
+  const binaryMask = new Uint8ClampedArray(totalPixels);
+
+  for (let i = 0; i < totalPixels; i += 1) {
+    binaryMask[i] = data[i] ? 255 : 0;
+  }
+
+  const longestEdge = Math.max(width, height);
+  const dilationIterations = Math.min(3, Math.max(1, Math.round(longestEdge / 900)));
+  const blurRadius = Math.min(18, Math.max(4, Math.round(longestEdge / 200)));
+
+  const softenedMask = dilateBinaryMask(binaryMask, width, height, dilationIterations);
+
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+  if (!maskCtx) {
+    return maskCanvas;
+  }
+  const maskImageData = maskCtx.createImageData(width, height);
+
+  for (let i = 0; i < totalPixels; i += 1) {
+    const alpha = softenedMask[i];
+    const offset = i * 4;
+    maskImageData.data[offset] = 255;
+    maskImageData.data[offset + 1] = 255;
+    maskImageData.data[offset + 2] = 255;
+    maskImageData.data[offset + 3] = alpha;
+  }
+
+  maskCtx.putImageData(maskImageData, 0, 0);
+
+  if (blurRadius > 0) {
+    const blurredCanvas = document.createElement('canvas');
+    blurredCanvas.width = width;
+    blurredCanvas.height = height;
+    const blurredCtx = blurredCanvas.getContext('2d');
+    if (!blurredCtx) {
+      return maskCanvas;
+    }
+    blurredCtx.filter = `blur(${blurRadius}px)`;
+    blurredCtx.drawImage(maskCanvas, 0, 0);
+    blurredCtx.filter = 'none';
+
+    return blurredCanvas;
+  }
+
+  return maskCanvas;
 }
 
 async function handleFileChange(event) {
@@ -137,7 +241,9 @@ async function processImage(imageElement, { fileName, taskId }) {
 
     const segmentation = await net.segmentPerson(imageElement, {
       internalResolution: 'full',
-      segmentationThreshold: 0.88,
+      segmentationThreshold: 0.86,
+      maxDetections: 1,
+      scoreThreshold: 0.3,
     });
 
     if (taskId !== activeTaskId) {
@@ -166,19 +272,10 @@ async function processImage(imageElement, { fileName, taskId }) {
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(imageElement, 0, 0, width, height);
 
-    const foregroundColor = { r: 255, g: 255, b: 255, a: 255 };
-    const backgroundColor = { r: 255, g: 255, b: 255, a: 0 };
-    const mask = bodyPix.toMask(segmentation, foregroundColor, backgroundColor);
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = width;
-    maskCanvas.height = height;
-    const maskCtx = maskCanvas.getContext('2d');
-    maskCtx.clearRect(0, 0, width, height);
-    const maskBlurAmount = 8;
-    bodyPix.drawMask(maskCanvas, maskCanvas, mask, 1, maskBlurAmount, false);
+    const featheredMaskCanvas = createFeatheredMaskCanvas(segmentation);
 
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(maskCanvas, 0, 0, width, height);
+    ctx.drawImage(featheredMaskCanvas, 0, 0, width, height);
     ctx.globalCompositeOperation = 'source-over';
 
     const dataUrl = resultCanvas.toDataURL('image/png');
