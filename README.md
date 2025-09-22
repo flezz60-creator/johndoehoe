@@ -8,6 +8,8 @@ Eine kleine Webanwendung, die mithilfe von TensorFlow.js den Hintergrund von Fot
 2. Klicke auf **Bild auswählen** und wähle ein Foto mit einer Person aus.
 3. Nach wenigen Sekunden erscheint eine Version ohne Hintergrund, die du als PNG herunterladen kannst.
 
+> Hinweis: Beim ersten Start lädt die Anwendung ein hochauflösendes BodyPix-Modell (ResNet50). Je nach Gerät kann dies einige Sekunden dauern.
+
 > Hinweis: Für bestmögliche Ergebnisse sollte die Person vollständig zu sehen sein und sich klar vom Hintergrund abheben.
 
 ## Technik

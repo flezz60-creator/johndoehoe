@@ -56,11 +56,10 @@ function resetInterface(clearFileInput = true, cancelProcessing = false) {
 
 async function ensureModelLoaded() {
   if (!netPromise) {
-    toggleLoading(true, 'Modell wird geladen …');
+    toggleLoading(true, 'Präzises Modell wird geladen … dies kann einen Moment dauern.');
     netPromise = bodyPix.load({
-      architecture: 'MobileNetV1',
+      architecture: 'ResNet50',
       outputStride: 16,
-      multiplier: 0.75,
       quantBytes: 2,
     });
   }
@@ -137,8 +136,8 @@ async function processImage(imageElement, { fileName, taskId }) {
     toggleLoading(true, 'Hintergrund wird entfernt …');
 
     const segmentation = await net.segmentPerson(imageElement, {
-      internalResolution: 'medium',
-      segmentationThreshold: 0.7,
+      internalResolution: 'full',
+      segmentationThreshold: 0.88,
     });
 
     if (taskId !== activeTaskId) {
@@ -146,32 +145,10 @@ async function processImage(imageElement, { fileName, taskId }) {
     }
 
     const { width, height, data: maskData } = segmentation;
-    const totalPixels = maskData.length;
-
-    const offscreenCanvas = document.createElement('canvas');
-    offscreenCanvas.width = width;
-    offscreenCanvas.height = height;
-    const offscreenCtx = offscreenCanvas.getContext('2d');
-    offscreenCtx.drawImage(imageElement, 0, 0, width, height);
-    const sourceImageData = offscreenCtx.getImageData(0, 0, width, height);
-    const sourcePixels = sourceImageData.data;
-
-    const outputPixels = new Uint8ClampedArray(sourcePixels.length);
     let personPixelCount = 0;
-
-    for (let i = 0; i < totalPixels; i += 1) {
-      const offset = i * 4;
+    for (let i = 0; i < maskData.length; i += 1) {
       if (maskData[i] === 1) {
-        outputPixels[offset] = sourcePixels[offset];
-        outputPixels[offset + 1] = sourcePixels[offset + 1];
-        outputPixels[offset + 2] = sourcePixels[offset + 2];
-        outputPixels[offset + 3] = 255;
         personPixelCount += 1;
-      } else {
-        outputPixels[offset] = 0;
-        outputPixels[offset + 1] = 0;
-        outputPixels[offset + 2] = 0;
-        outputPixels[offset + 3] = 0;
       }
     }
 
@@ -186,7 +163,23 @@ async function processImage(imageElement, { fileName, taskId }) {
     resultCanvas.width = width;
     resultCanvas.height = height;
     const ctx = resultCanvas.getContext('2d');
-    ctx.putImageData(new ImageData(outputPixels, width, height), 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(imageElement, 0, 0, width, height);
+
+    const foregroundColor = { r: 255, g: 255, b: 255, a: 255 };
+    const backgroundColor = { r: 255, g: 255, b: 255, a: 0 };
+    const mask = bodyPix.toMask(segmentation, foregroundColor, backgroundColor);
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.clearRect(0, 0, width, height);
+    const maskBlurAmount = 8;
+    bodyPix.drawMask(maskCanvas, maskCanvas, mask, 1, maskBlurAmount, false);
+
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(maskCanvas, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
 
     const dataUrl = resultCanvas.toDataURL('image/png');
     downloadButton.href = dataUrl;
