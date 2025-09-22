@@ -68,6 +68,58 @@
         </article>
       </section>
 
+      <section id="refineSection" class="refine hidden" aria-live="polite">
+        <div>
+          <h2>Nachbearbeitung mit dem Pinsel</h2>
+          <p class="refine__intro">
+            Markiere im Ergebnisbereich zusätzliche Vordergrundbereiche oder
+            entferne noch sichtbaren Hintergrund.
+          </p>
+        </div>
+        <div class="refine__controls">
+          <div class="refine__mode" role="group" aria-label="Pinselmodus">
+            <button
+              id="brushAddButton"
+              type="button"
+              class="refine__mode-button"
+            >
+              Vordergrund
+            </button>
+            <button
+              id="brushEraseButton"
+              type="button"
+              class="refine__mode-button"
+            >
+              Hintergrund
+            </button>
+          </div>
+          <label class="refine__slider" for="brushSizeInput">
+            <span>
+              Pinselgröße:
+              <span id="brushSizeValue" aria-live="polite">40 px</span>
+            </span>
+            <input
+              id="brushSizeInput"
+              type="range"
+              min="10"
+              max="150"
+              value="40"
+            />
+          </label>
+          <button
+            id="resetMaskButton"
+            type="button"
+            class="button button--ghost refine__reset"
+          >
+            Maske zurücksetzen
+          </button>
+        </div>
+        <p class="refine__hint">
+          Tipp: Male direkt in das Ergebnisbild, um den freigestellten Bereich
+          zu vergrößern oder zu verkleinern.
+        </p>
+      </section>
+
       <section class="actions">
         <a
           id="downloadButton"
@@ -86,9 +138,9 @@
 
     <footer class="footer">
       <p>
-        Diese Demo nutzt das BodyPix-Modell von TensorFlow.js, um Personen im
-        Bild zu erkennen und den Hintergrund zu entfernen. Alle Berechnungen
-        werden lokal ausgeführt.
+        Diese Demo nutzt TensorFlow.js BodyPix mit hochauflösenden Einstellungen,
+        um Personen freizustellen. Kanten lassen sich anschließend per Pinsel
+        manuell nachbearbeiten. Alle Berechnungen werden lokal ausgeführt.
       </p>
     </footer>
 
