@@ -6,7 +6,7 @@ const resultCanvas = document.getElementById('resultCanvas');
 const downloadButton = document.getElementById('downloadButton');
 const resetButton = document.getElementById('resetButton');
 
-let netPromise = null;
+let segmenterPromise = null;
 let activeTaskId = 0;
 
 const defaultStatus = 'Wähle ein Bild, um den Hintergrund zu entfernen.';
@@ -55,16 +55,259 @@ function resetInterface(clearFileInput = true, cancelProcessing = false) {
 }
 
 async function ensureModelLoaded() {
-  if (!netPromise) {
-    toggleLoading(true, 'Modell wird geladen …');
-    netPromise = bodyPix.load({
-      architecture: 'MobileNetV1',
-      outputStride: 16,
-      multiplier: 0.75,
-      quantBytes: 2,
-    });
+  if (!segmenterPromise) {
+    toggleLoading(
+      true,
+      'Hochwertiges Segmentierungsmodell wird geladen … dies kann einen Moment dauern.',
+    );
+
+    const { bodySegmentation } = window;
+    if (!bodySegmentation) {
+      toggleLoading(false);
+      throw new Error('Segmentierungsbibliothek konnte nicht geladen werden.');
+    }
+
+    const model = bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation;
+    const config = {
+      runtime: 'mediapipe',
+      modelType: 'general',
+      solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1',
+    };
+
+    segmenterPromise = bodySegmentation
+      .createSegmenter(model, config)
+      .catch((error) => {
+        segmenterPromise = null;
+        throw error;
+      });
   }
-  return netPromise;
+
+  return segmenterPromise;
+}
+
+function dilateBinaryMask(sourceMask, width, height, iterations) {
+  if (iterations <= 0) {
+    return new Uint8ClampedArray(sourceMask);
+  }
+
+  let current = new Uint8ClampedArray(sourceMask);
+  let next = new Uint8ClampedArray(sourceMask.length);
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    next.fill(0);
+
+    for (let y = 0; y < height; y += 1) {
+      const rowOffset = y * width;
+      for (let x = 0; x < width; x += 1) {
+        const index = rowOffset + x;
+        if (current[index]) {
+          next[index] = 255;
+          continue;
+        }
+
+        let shouldFill = false;
+        for (let dy = -1; dy <= 1 && !shouldFill; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) {
+            continue;
+          }
+          const nRowOffset = ny * width;
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) {
+              continue;
+            }
+            if (current[nRowOffset + nx]) {
+              shouldFill = true;
+              break;
+            }
+          }
+        }
+
+        if (shouldFill) {
+          next[index] = 255;
+        }
+      }
+    }
+
+    const temp = current;
+    current = next;
+    next = temp;
+  }
+
+  return current;
+}
+
+function erodeBinaryMask(sourceMask, width, height, iterations) {
+  if (iterations <= 0) {
+    return new Uint8ClampedArray(sourceMask);
+  }
+
+  let current = new Uint8ClampedArray(sourceMask);
+  let next = new Uint8ClampedArray(sourceMask.length);
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    next.fill(0);
+
+    for (let y = 0; y < height; y += 1) {
+      const rowOffset = y * width;
+      for (let x = 0; x < width; x += 1) {
+        const index = rowOffset + x;
+        if (!current[index]) {
+          continue;
+        }
+
+        let shouldKeep = true;
+        for (let dy = -1; dy <= 1 && shouldKeep; dy += 1) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) {
+            shouldKeep = false;
+            break;
+          }
+          const nRowOffset = ny * width;
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) {
+              shouldKeep = false;
+              break;
+            }
+            if (!current[nRowOffset + nx]) {
+              shouldKeep = false;
+              break;
+            }
+          }
+        }
+
+        if (shouldKeep) {
+          next[index] = 255;
+        }
+      }
+    }
+
+    const temp = current;
+    current = next;
+    next = temp;
+  }
+
+  return current;
+}
+
+async function createFeatheredMaskCanvas(segmentation) {
+  if (!segmentation) {
+    return null;
+  }
+
+  const maskImage = await segmentation.mask.toImageData();
+  const { width, height, data } = maskImage;
+  const totalPixels = width * height;
+
+  const probabilities = new Float32Array(totalPixels);
+  let confidentPixelCount = 0;
+
+  for (let i = 0; i < totalPixels; i += 1) {
+    const probability = data[i * 4 + 3] / 255;
+    probabilities[i] = probability;
+    if (probability >= 0.35) {
+      confidentPixelCount += 1;
+    }
+  }
+
+  if (confidentPixelCount === 0) {
+    return null;
+  }
+
+  const threshold = 0.75;
+  const softness = 0.18;
+  const lower = Math.max(0, threshold - softness);
+  const upper = Math.min(1, threshold + softness);
+  const range = upper - lower || 1;
+
+  const softMask = new Uint8ClampedArray(totalPixels);
+  const binaryMask = new Uint8ClampedArray(totalPixels);
+
+  for (let i = 0; i < totalPixels; i += 1) {
+    const probability = probabilities[i];
+    let weight;
+    if (probability <= lower) {
+      weight = 0;
+    } else if (probability >= upper) {
+      weight = 1;
+    } else {
+      const normalized = (probability - lower) / range;
+      weight = Math.pow(Math.min(Math.max(normalized, 0), 1), 0.75);
+    }
+
+    const blended = Math.max(weight, Math.min(probability, 1));
+    const alpha = Math.round(Math.min(Math.max(blended, 0), 1) * 255);
+    softMask[i] = alpha;
+    binaryMask[i] = alpha >= 150 ? 255 : 0;
+  }
+
+  const longestEdge = Math.max(width, height);
+  const dilationIterations = Math.min(4, Math.max(1, Math.round(longestEdge / 700)));
+  const erosionIterations = Math.max(1, Math.round(dilationIterations * 0.75));
+
+  const dilatedMask = dilateBinaryMask(binaryMask, width, height, dilationIterations);
+  const closedMask = erodeBinaryMask(dilatedMask, width, height, erosionIterations);
+
+  let foregroundPixelCount = 0;
+  for (let i = 0; i < totalPixels; i += 1) {
+    if (closedMask[i]) {
+      foregroundPixelCount += 1;
+      softMask[i] = Math.max(softMask[i], 210);
+    } else {
+      softMask[i] = Math.min(softMask[i], 10);
+    }
+  }
+
+  if (foregroundPixelCount === 0) {
+    return null;
+  }
+
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+  if (!maskCtx) {
+    return null;
+  }
+
+  const maskImageData = maskCtx.createImageData(width, height);
+  for (let i = 0; i < totalPixels; i += 1) {
+    const offset = i * 4;
+    const alpha = softMask[i];
+    maskImageData.data[offset] = 255;
+    maskImageData.data[offset + 1] = 255;
+    maskImageData.data[offset + 2] = 255;
+    maskImageData.data[offset + 3] = alpha;
+  }
+
+  maskCtx.putImageData(maskImageData, 0, 0);
+
+  const blurRadius = Math.min(20, Math.max(6, Math.round(longestEdge / 240)));
+  let outputCanvas = maskCanvas;
+
+  if (blurRadius > 0) {
+    const blurredCanvas = document.createElement('canvas');
+    blurredCanvas.width = width;
+    blurredCanvas.height = height;
+    const blurredCtx = blurredCanvas.getContext('2d');
+    if (blurredCtx) {
+      blurredCtx.filter = `blur(${blurRadius}px)`;
+      blurredCtx.drawImage(maskCanvas, 0, 0);
+      blurredCtx.filter = 'none';
+      outputCanvas = blurredCanvas;
+    }
+  }
+
+  const foregroundRatio = foregroundPixelCount / totalPixels;
+
+  return {
+    canvas: outputCanvas,
+    width,
+    height,
+    foregroundRatio,
+  };
 }
 
 async function handleFileChange(event) {
@@ -129,53 +372,26 @@ async function processImage(imageElement, { fileName, taskId }) {
   setStatus('Hintergrund wird entfernt …');
 
   try {
-    const net = await ensureModelLoaded();
+    const segmenter = await ensureModelLoaded();
     if (taskId !== activeTaskId) {
       return;
     }
 
     toggleLoading(true, 'Hintergrund wird entfernt …');
 
-    const segmentation = await net.segmentPerson(imageElement, {
-      internalResolution: 'medium',
-      segmentationThreshold: 0.7,
-    });
+    const segmentations = await segmenter.segmentPeople(imageElement);
 
     if (taskId !== activeTaskId) {
       return;
     }
 
-    const { width, height, data: maskData } = segmentation;
-    const totalPixels = maskData.length;
-
-    const offscreenCanvas = document.createElement('canvas');
-    offscreenCanvas.width = width;
-    offscreenCanvas.height = height;
-    const offscreenCtx = offscreenCanvas.getContext('2d');
-    offscreenCtx.drawImage(imageElement, 0, 0, width, height);
-    const sourceImageData = offscreenCtx.getImageData(0, 0, width, height);
-    const sourcePixels = sourceImageData.data;
-
-    const outputPixels = new Uint8ClampedArray(sourcePixels.length);
-    let personPixelCount = 0;
-
-    for (let i = 0; i < totalPixels; i += 1) {
-      const offset = i * 4;
-      if (maskData[i] === 1) {
-        outputPixels[offset] = sourcePixels[offset];
-        outputPixels[offset + 1] = sourcePixels[offset + 1];
-        outputPixels[offset + 2] = sourcePixels[offset + 2];
-        outputPixels[offset + 3] = 255;
-        personPixelCount += 1;
-      } else {
-        outputPixels[offset] = 0;
-        outputPixels[offset + 1] = 0;
-        outputPixels[offset + 2] = 0;
-        outputPixels[offset + 3] = 0;
-      }
+    if (!segmentations || segmentations.length === 0) {
+      throw new Error('Keine Person erkannt');
     }
 
-    if (personPixelCount === 0) {
+    const maskResult = await createFeatheredMaskCanvas(segmentations[0]);
+
+    if (!maskResult || maskResult.foregroundRatio < 0.0005) {
       throw new Error('Keine Person erkannt');
     }
 
@@ -183,10 +399,18 @@ async function processImage(imageElement, { fileName, taskId }) {
       return;
     }
 
-    resultCanvas.width = width;
-    resultCanvas.height = height;
+    const targetWidth = imageElement.naturalWidth || imageElement.width;
+    const targetHeight = imageElement.naturalHeight || imageElement.height;
+
+    resultCanvas.width = targetWidth;
+    resultCanvas.height = targetHeight;
     const ctx = resultCanvas.getContext('2d');
-    ctx.putImageData(new ImageData(outputPixels, width, height), 0, 0);
+    ctx.clearRect(0, 0, targetWidth, targetHeight);
+    ctx.drawImage(imageElement, 0, 0, targetWidth, targetHeight);
+
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(maskResult.canvas, 0, 0, targetWidth, targetHeight);
+    ctx.globalCompositeOperation = 'source-over';
 
     const dataUrl = resultCanvas.toDataURL('image/png');
     downloadButton.href = dataUrl;

@@ -86,14 +86,15 @@
 
     <footer class="footer">
       <p>
-        Diese Demo nutzt das BodyPix-Modell von TensorFlow.js, um Personen im
-        Bild zu erkennen und den Hintergrund zu entfernen. Alle Berechnungen
-        werden lokal ausgeführt.
+        Diese Demo nutzt das MediaPipe Selfie-Segmentation-Modell via TensorFlow.js,
+        um Personen im Bild zu erkennen und den Hintergrund zu entfernen. Alle
+        Berechnungen werden lokal ausgeführt.
       </p>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix@2.2.0/dist/body-pix.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1/selfie_segmentation.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.1/dist/body-segmentation.min.js"></script>
     <script src="script.js" defer></script>
   </body>
 </html>
