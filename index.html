@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hintergrund aus Bild entfernen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__content">
+        <h1>Hintergrundentferner</h1>
+        <p>
+          Lade ein Foto von einer Person hoch und erhalte in wenigen Sekunden eine
+          Version ohne Hintergrund.
+        </p>
+      </div>
+    </header>
+
+    <main>
+      <section class="uploader" aria-label="Bild hochladen">
+        <div class="uploader__input">
+          <input id="fileInput" type="file" accept="image/*" hidden />
+          <label for="fileInput" class="button button--primary">
+            <span>Bild auswählen</span>
+          </label>
+          <p class="uploader__hint">
+            Unterstützt JPG, PNG und WEBP. Die Verarbei­tung findet direkt in
+            deinem Browser statt.
+          </p>
+        </div>
+        <p id="statusText" class="status">
+          Wähle ein Bild, um den Hintergrund zu entfernen.
+        </p>
+        <div id="loadingIndicator" class="loading hidden" role="status">
+          <div class="spinner" aria-hidden="true"></div>
+          <span>Modell wird geladen …</span>
+        </div>
+      </section>
+
+      <section class="previews" aria-live="polite">
+        <article class="card">
+          <h2>Originalbild</h2>
+          <div class="preview-frame">
+            <img
+              id="originalPreview"
+              alt="Vorschau des Originalbildes"
+              class="preview"
+            />
+          </div>
+        </article>
+        <article class="card">
+          <h2>Hintergrund entfernt</h2>
+          <div class="preview-frame preview-frame--transparent">
+            <canvas
+              id="resultCanvas"
+              class="preview"
+              role="img"
+              aria-label="Bild ohne Hintergrund"
+            ></canvas>
+          </div>
+        </article>
+      </section>
+
+      <section class="actions">
+        <a
+          id="downloadButton"
+          class="button button--secondary button--disabled"
+          href="#"
+          download
+          aria-disabled="true"
+        >
+          PNG herunterladen
+        </a>
+        <button id="resetButton" type="button" class="button button--ghost">
+          Neues Bild wählen
+        </button>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Diese Demo nutzt das BodyPix-Modell von TensorFlow.js, um Personen im
+        Bild zu erkennen und den Hintergrund zu entfernen. Alle Berechnungen
+        werden lokal ausgeführt.
+      </p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix@2.2.0/dist/body-pix.min.js"></script>
+    <script src="script.js" defer></script>
+  </body>
+</html>
